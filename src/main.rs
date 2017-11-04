@@ -3,10 +3,16 @@
 #[macro_use]
 
 extern crate serde_derive;
+extern crate serde_json;
 extern crate rocket;
 
 use rocket::request::FromFormValue;
 use rocket::http::{RawStr, Status};
+use std::io::Cursor;
+use rocket::request::Request;
+use rocket::response::{Response, Responder};
+use rocket::http::ContentType;
+use serde_json::ser::to_vec;
 
 struct Latitude(isize);
 
@@ -27,27 +33,27 @@ impl<'v> FromFormValue<'v> for Latitude {
 }
 
 #[derive(FromForm)]
-struct Person {
+struct Coordinate {
     name: String,
-    age: Result<Latitude, &'static str>,
+    lat: Result<Latitude, &'static str>,
 }
 
-use std::io::Cursor;
-use rocket::request::Request;
-use rocket::response::{Response, Responder};
-use rocket::http::ContentType;
-
-#[derive(Deserialize, Debug)]
-struct QueryError(&'static str);
+#[derive(Deserialize, Serialize, Debug)]
+struct QueryError {
+    message: &'static str,
+}
 
 impl<'r> Responder<'r> for QueryError {
     fn respond_to(self, _: &Request) -> Result<Response<'static>, Status> {
-        let msg = format!("msg: {}", self.0);
-        Response::build()
-            .header(ContentType::Plain)
-            .status(Status::BadRequest)
-            .sized_body(Cursor::new(msg))
-            .ok()
+        to_vec(&self)
+            .map_err(|_| Status::InternalServerError)
+            .and_then(|bytes| {
+                          Response::build()
+                              .header(ContentType::JSON)
+                              .status(Status::BadRequest)
+                              .sized_body(Cursor::new(bytes))
+                              .ok()
+                      })
     }
 }
 
@@ -56,12 +62,11 @@ fn index() -> &'static str {
     "Hello, world!"
 }
 
-#[get("/hello?<person>")]
-fn hello(person: Person) -> Result<String, QueryError> {
-    if let Ok(_) = person.age {
-        Ok(format!("Hello, Mr {}", person.name))
-    } else {
-        Err(QueryError("fail"))
+#[get("/test?<coordinate>")]
+fn hello(coordinate: Coordinate) -> Result<String, QueryError> {
+    match coordinate.lat {
+        Ok(_) => Ok(format!("Hello Mr {}", coordinate.name)),
+        Err(e) => Err(QueryError { message: e }),
     }
 }
 
