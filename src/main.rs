@@ -33,9 +33,40 @@ impl<'v> FromFormValue<'v> for Latitude {
 }
 
 #[derive(FromForm)]
-struct Coordinate {
+struct TestParams {
     name: String,
     lat: Result<Latitude, &'static str>,
+}
+
+#[derive(Debug)]
+struct Location {
+    lng: f32,
+    lat: f32,
+}
+
+impl<'v> FromFormValue<'v> for Location {
+    type Error = &'static str;
+
+    fn from_form_value(v: &'v RawStr) -> Result<Self, Self::Error> {
+        let parse_err_msg = "location parsing failed";
+        let parts: Vec<&str> = v.split(",").collect();
+        let get_parsed = |i: usize| {
+            let part: &str = parts.get(i).ok_or(parse_err_msg)?;
+            part.parse::<f32>().or(Err(parse_err_msg))
+        };
+        let lng = get_parsed(0)?;
+        let lat = get_parsed(1)?;
+        if parts.len() > 2 {
+            return Err(parse_err_msg);
+        }
+        Ok(Location { lng, lat })
+    }
+}
+
+#[derive(Debug, FromForm)]
+struct ByBbox {
+    ne: Location,
+    sw: Location,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -62,14 +93,22 @@ fn index() -> &'static str {
     "Hello, world!"
 }
 
-#[get("/test?<coordinate>")]
-fn hello(coordinate: Coordinate) -> Result<String, QueryError> {
-    match coordinate.lat {
-        Ok(_) => Ok(format!("Hello Mr {}", coordinate.name)),
+
+#[get("/toast?<by_bbox>")]
+fn toast(by_bbox: ByBbox) -> String {
+    format!("bbox: {:?}", by_bbox)
+}
+
+#[get("/test?<test_params>")]
+fn test(test_params: TestParams) -> Result<String, QueryError> {
+    match test_params.lat {
+        Ok(_) => Ok(format!("Hello Mr {}", test_params.name)),
         Err(e) => Err(QueryError { message: e }),
     }
 }
 
 fn main() {
-    rocket::ignite().mount("/", routes![index, hello]).launch();
+    rocket::ignite()
+        .mount("/", routes![index, test, toast])
+        .launch();
 }
